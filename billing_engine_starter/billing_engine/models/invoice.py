@@ -40,6 +40,7 @@ class Invoice:
     subscription_id: int
     period_start: date
     period_end: date
+    currency : str
     subtotal: Money
     discount_total: Money
     tax_total: Money
