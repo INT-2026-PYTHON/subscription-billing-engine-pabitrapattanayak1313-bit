@@ -169,6 +169,100 @@ class BillingCycle:
 
     # --------------------------------------------------------
     def upgrade_subscription(self, subscription_id: int, new_plan_id: int, switch_date: date) -> None:
-        """Mid-cycle upgrade — Day 4 stretch."""
-        # TODO Day 4
-        raise NotImplementedError("Day 4: implement BillingCycle.upgrade_subscription")
+
+     with self.db.transaction():
+
+        # -------------------------
+        # LOAD DATA
+        # -------------------------
+        sub = self.subscription_repo.get(subscription_id)
+        customer = self.customer_repo.get(sub.customer_id)
+
+        old_plan = self.plan_repo.get(sub.plan_id)
+        new_plan = self.plan_repo.get(new_plan_id)
+
+        # -------------------------
+        # PRORATION CALC
+        # -------------------------
+        tax_calc, tax_context = self.tax_factory(customer)
+
+        pr = compute_proration(
+            old_plan.price,
+            new_plan.price,
+            sub.current_period_start,
+            sub.current_period_end,
+            switch_date,
+            tax_calc,
+            tax_context,
+        )
+
+        # -------------------------
+        # CREATE INVOICE
+        # -------------------------
+        invoice = self.invoice_repo.add(
+            type(
+                "InvoiceDraft",
+                (),
+                {
+                    "id": None,
+                    "subscription_id": sub.id,
+                    "customer_id": sub.customer_id,
+                    "status": InvoiceStatus.ISSUED,
+                    "currency": old_plan.price.currency,
+                    "period_start": sub.current_period_start,
+                    "period_end": sub.current_period_end,
+                    "total": pr.charge_amount - pr.credit_amount,
+                    "line_items": [],
+                },
+            )()
+        )
+
+        # -------------------------
+        # LINE ITEMS
+        # -------------------------
+        self.line_item_repo.add(
+            type(
+                "LineItem",
+                (),
+                {
+                    "id": None,
+                    "invoice_id": invoice.id,
+                    "description": "Proration Credit",
+                    "amount": pr.credit_amount,
+                    "kind": LineItemKind.PRORATION_CREDIT,
+                },
+            )()
+        )
+
+        self.line_item_repo.add(
+            type(
+                "LineItem",
+                (),
+                {
+                    "id": None,
+                    "invoice_id": invoice.id,
+                    "description": "Proration Charge",
+                    "amount": pr.charge_amount,
+                    "kind": LineItemKind.PRORATION_CHARGE,
+                },
+            )()
+        )
+
+        # -------------------------
+        # LEDGER ENTRY
+        # -------------------------
+        self.ledger_repo.add(
+            LedgerEntry(
+                id=None,
+                invoice_id=invoice.id,
+                customer_id=sub.customer_id,
+                amount=pr.charge_amount - pr.credit_amount,
+                direction=LedgerDirection.DEBIT,
+                reason="Mid-cycle upgrade proration",
+            )
+        )
+
+        # -------------------------
+        # SWITCH PLAN
+        # -------------------------
+        self.subscription_repo.update_plan(subscription_id, new_plan_id)

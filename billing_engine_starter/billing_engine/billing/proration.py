@@ -19,12 +19,11 @@ on a proration credit/charge is just `tax_calc.apply(credit_or_charge)`.
 The two legs are returned as TAX-INCLUSIVE Money values for the
 PRORATION_CREDIT (negative) and PRORATION_CHARGE (positive) line items.
 """
-
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from billing_engine.money import Money
 from billing_engine.taxes.base import TaxCalculator, TaxContext
@@ -32,10 +31,20 @@ from billing_engine.taxes.base import TaxCalculator, TaxContext
 
 @dataclass(frozen=True)
 class ProrationResult:
-    credit_amount: Money     # always returned as a POSITIVE Money; caller negates for line item
-    charge_amount: Money     # always positive
-    credit_tax: Money        # tax that was on the credit
-    charge_tax: Money        # tax that is on the new charge
+    credit_amount: Money
+    charge_amount: Money
+    credit_tax: Money
+    charge_tax: Money
+
+
+# -------------------------
+# helper: currency rounding
+# -------------------------
+def _round_money(value: Money) -> Money:
+    return Money(
+        value.amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+        value.currency,
+    )
 
 
 def compute_proration(
@@ -47,6 +56,52 @@ def compute_proration(
     tax_calc: TaxCalculator,
     tax_context: TaxContext,
 ) -> ProrationResult:
-    """Pure function. STRETCH — implement only after Days 1+2 are green."""
-    # TODO Day 4
-    raise NotImplementedError("Day 4: implement compute_proration")
+
+    # -------------------------
+    # VALIDATION
+    # -------------------------
+    if not (period_start <= switch_date <= period_end):
+        raise ValueError("switch_date outside billing period")
+
+    if old_plan_price.currency != new_plan_price.currency:
+        raise ValueError("currency mismatch")
+
+    total_days = (period_end - period_start).days
+    if total_days <= 0:
+        raise ValueError("invalid billing period")
+
+    used_days = (switch_date - period_start).days
+    remaining_days = total_days - used_days
+
+    if remaining_days < 0:
+        remaining_days = 0
+
+    ratio = Decimal(remaining_days) / Decimal(total_days)
+
+    # -------------------------
+    # PRORATION CALCULATION
+    # -------------------------
+    credit_amount = old_plan_price * ratio
+    charge_amount = new_plan_price * ratio
+
+    # IMPORTANT: round BEFORE tax calculation (matches test expectations)
+    credit_amount = _round_money(credit_amount)
+    charge_amount = _round_money(charge_amount)
+
+    # -------------------------
+    # TAX (recalculated independently)
+    # -------------------------
+    credit_tax = _round_money(
+        tax_calc.apply(credit_amount, tax_context).total
+    )
+
+    charge_tax = _round_money(
+        tax_calc.apply(charge_amount, tax_context).total
+    )
+
+    return ProrationResult(
+        credit_amount=credit_amount,
+        charge_amount=charge_amount,
+        credit_tax=credit_tax,
+        charge_tax=charge_tax,
+    )
