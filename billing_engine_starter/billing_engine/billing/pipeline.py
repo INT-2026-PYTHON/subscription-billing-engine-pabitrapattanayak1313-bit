@@ -89,7 +89,7 @@ def build_invoice(
     subscription_id=subscription.id,
     period_start=period_start,
     period_end=period_end,
-    currency=base.currency,      # <-- add this
+    currency=base.currency,      
     subtotal=base,
     discount_total=discount_amount,
     tax_total=breakdown.total,

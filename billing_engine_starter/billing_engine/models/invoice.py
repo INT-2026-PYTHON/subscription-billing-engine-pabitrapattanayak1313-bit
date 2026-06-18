@@ -33,19 +33,23 @@ class InvoiceLineItem:
     amount: Money
     kind: LineItemKind
 
-
 @dataclass
 class Invoice:
-    id: Optional[int]
+    id: int | None
     subscription_id: int
+
     period_start: date
     period_end: date
-    currency : str
-    subtotal: Money
-    discount_total: Money
-    tax_total: Money
-    total: Money
-    status: InvoiceStatus
+
+    currency: str = "INR"
+
+    subtotal: Money = None
+    discount_total: Money = None
+    tax_total: Money = None
+    total: Money = None
+
+    status: InvoiceStatus = InvoiceStatus.DRAFT
+
     issued_at: Optional[datetime] = None
     pdf_path: Optional[str] = None
     line_items: list[InvoiceLineItem] = field(default_factory=list)
